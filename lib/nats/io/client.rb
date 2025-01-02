@@ -1298,6 +1298,11 @@ module NATS
               @flusher_thread.exit if @flusher_thread.alive?
               @ping_interval_thread.exit if @ping_interval_thread.alive?
 
+              if @subscription_executor.running?
+                @subscription_executor.shutdown
+                @subscription_executor.wait_for_termination(@options[:connect_timeout])
+              end
+
               attempt_reconnect
             rescue NATS::IO::NoServersError => e
               @last_err = e

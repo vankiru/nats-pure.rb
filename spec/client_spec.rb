@@ -272,63 +272,6 @@ describe 'Client - Specification' do
     nc.close
   end
 
-  it 'should close connection gracefully' do
-    mon = Monitor.new
-    test_is_done = mon.new_cond
-
-    nats = NATS::IO::Client.new
-    nats.connect(:servers => [@s.uri], :reconnect => false)
-
-    errors = []
-    disconnects = 0
-    closes = 0
-
-    nats.on_error do |e|
-      errors << e
-    end
-
-    nats.on_disconnect do
-      disconnects += 1
-    end
-
-    nats.on_close do
-      closes += 1
-      mon.synchronize do
-        test_is_done.signal
-      end
-    end
-
-    msgs = []
-    nats.subscribe("bar.>") do |msg|
-      msgs << msg
-    end
-    nats.flush
-
-    pub_thread = Thread.new do
-      1.upto(10000).each do |n|
-        mon.synchronize { nats.publish("bar.#{n}", "A" * 10) unless nats.closed? }
-      end
-      sleep 0.01
-      10001.upto(20000).each do |n|
-        mon.synchronize { nats.publish("bar.#{n}", "B" * 10) unless nats.closed? }
-      end
-    end
-    pub_thread.abort_on_exception = true
-
-    mon.synchronize do
-      nats.close
-      test_is_done.wait(1)
-    end
-
-    expect(nats.status).to eql(NATS::IO::CLOSED)
-    expect(errors).to be_empty
-    expect(disconnects).to eql(1)
-    expect(closes).to eql(1)
-
-    # Make sure to kill the publishing thread
-    pub_thread.kill
-  end
-
   it "should support distributed queues" do
     conns = Hash.new { |h,k| h[k] = {}}
     5.times do |n|
@@ -556,6 +499,73 @@ describe 'Client - Specification' do
         msg = sub.next_msg
         expect(msg.data).to eql('hello world')
       end.to_not raise_error
+    end
+  end
+
+  describe "#close" do
+    it "closes connection gracefully" do
+      mon = Monitor.new
+      test_is_done = mon.new_cond
+
+      nats = NATS::IO::Client.new
+      nats.connect(:servers => [@s.uri], :reconnect => false)
+
+      errors = []
+      disconnects = 0
+      closes = 0
+
+      nats.on_error do |e|
+        errors << e
+      end
+
+      nats.on_disconnect do
+        disconnects += 1
+      end
+
+      nats.on_close do
+        closes += 1
+        mon.synchronize do
+          test_is_done.signal
+        end
+      end
+
+      msgs = []
+      nats.subscribe("bar.>") do |msg|
+        msgs << msg
+      end
+      nats.flush
+
+      pub_thread = Thread.new do
+        1.upto(10000).each do |n|
+          mon.synchronize { nats.publish("bar.#{n}", "A" * 10) unless nats.closed? }
+        end
+        sleep 0.01
+        10001.upto(20000).each do |n|
+          mon.synchronize { nats.publish("bar.#{n}", "B" * 10) unless nats.closed? }
+        end
+      end
+      pub_thread.abort_on_exception = true
+
+      mon.synchronize do
+        nats.close
+        test_is_done.wait(1)
+      end
+
+      expect(nats.status).to eql(NATS::IO::CLOSED)
+      expect(errors).to be_empty
+      expect(disconnects).to eql(1)
+      expect(closes).to eql(1)
+
+      # Make sure to kill the publishing thread
+      pub_thread.kill
+    end
+
+    it "closes all its threads" do
+      expect {
+        nats = NATS.connect(servers: [@s.uri])
+        nats.request("$SYS.REQ.USER.INFO")
+        nats.close
+      }.not_to change { Thread.list.count }
     end
   end
 end
