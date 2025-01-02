@@ -1609,6 +1609,9 @@ module NATS
           @io = nil
         end
       end
+
+      subscription_executor&.shutdown
+      subscription_executor&.wait_for_termination
     end
 
     def start_threads!
